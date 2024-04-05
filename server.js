@@ -94,7 +94,7 @@ const User = mongoose.model('User', UserSchema);
 
 // Modify the CaseStudySchema to include a status field
 const CaseStudySchema = new mongoose.Schema({
-  ticket_id: String,
+  case_id: String,
   created_by: String,
   date_created: Date,
   message: String,
@@ -148,7 +148,7 @@ app.get('/dashboard', requiresAuth(), async (req, res) => {
   let caseStudyCount = caseStudies.length;
 
   let caseStudyDetails = caseStudies.map(casestudy => `
-    <p>Ticket ID: ${casestudy.ticket_id}</p>
+    <p>Case ID: ${casestudy.case_id}</p>
     <p>Date Created: ${casestudy.date_created}</p>
     <p>Message: ${casestudy.message}</p>
     <p>Department: ${casestudy.department}</p>
@@ -195,7 +195,7 @@ app.post('/create_case', requiresAuth(), async (req, res) => {
   let email = req.oidc.user.email;
 
   var new_case = {
-    ticket_id: uuid.v4(),  // Use uuid to generate a new random ticket id
+    case_id: uuid.v4(),  // Use uuid to generate a new random case id
     created_by: name,
     date_created: new Date(),
     message: req.body.message,
@@ -214,8 +214,8 @@ app.get('/setStatus', requiresAuth(), (req, res) => {
   let form = `
     <h1>Set Case Study Status</h1>
     <form action="/setStatus" method="POST">
-      <label for="ticket_id">Ticket ID:</label><br>
-      <input type="text" id="ticket_id" name="ticket_id"><br>
+      <label for="case_id">Case ID:</label><br>
+      <input type="text" id="case_id" name="case_id"><br>
       <label for="status">Status:</label><br>
       <select name="status" id="status">
         <option value="Open">Open</option>
@@ -232,12 +232,12 @@ app.get('/setStatus', requiresAuth(), (req, res) => {
 // Handle a status update 
 app.post('/setStatus', requiresAuth(), async (req, res) => {
   
-  let ticket_id = req.body.ticket_id;
+  let case_id = req.body.case_id;
   let newStatus = req.body.status;
 
-  await CaseStudy.updateOne({ ticket_id: ticket_id }, { status: newStatus }); 
+  await CaseStudy.updateOne({ case_id: case_id }, { status: newStatus }); 
 
-  res.send(`Case study ${ticket_id} status successfully updated to ${newStatus}.`);
+  res.send(`Case study ${case_id} status successfully updated to ${newStatus}.`);
 });
 
 // Display cases with status 'Closed'
@@ -247,7 +247,7 @@ app.get('/closed', requiresAuth(), async (req, res) => {
   let closedCaseCount = closedCases.length;
 
   let caseDetails = closedCases.map(caseStudy => `
-    <p>Ticket ID: ${caseStudy.ticket_id}</p>
+    <p>Ticket ID: ${caseStudy.case_id}</p>
     <p>Status: ${caseStudy.status}</p>
   `).join('');
 
@@ -262,8 +262,8 @@ app.get('/find_case', requiresAuth(), (req, res) => {
   let form = `
     <h1>Find Case Study</h1>
     <form action="/find_case" method="POST">
-      <label for="ticket_id">Ticket ID:</label><br>
-      <input type="text" id="ticket_id" name="ticket_id"><br>
+      <label for="case_id">Case ID:</label><br>
+      <input type="text" id="case_id" name="case_id"><br>
       <input type="submit" value="Find Case Study">
     </form>
     <a href="/dashboard">Dashboard</a>
@@ -273,14 +273,14 @@ app.get('/find_case', requiresAuth(), (req, res) => {
 });
 
 app.post('/find_case', requiresAuth(), async (req, res) => {
-  let ticket_id = req.body.ticket_id;
+  let case_id = req.body.case_id;
   
-  let caseStudy = await CaseStudy.findOne({ ticket_id: ticket_id });
+  let caseStudy = await CaseStudy.findOne({ case_id: case_id });
   
   if(caseStudy) {
     res.send(`
       <h1>Case Study Found</h1>
-      <p>Ticket ID: ${caseStudy.ticket_id} </p>
+      <p>Case ID: ${caseStudy.case_id} </p>
       <p>Created By: ${caseStudy.created_by} </p>
       <p>Date Created: ${caseStudy.date_created} </p>
       <p>Message: ${caseStudy.message} </p>
@@ -290,46 +290,88 @@ app.post('/find_case', requiresAuth(), async (req, res) => {
     `);
   } else {
     res.send(`
-      <h1>No Case Study Found for Ticket ID: ${ticket_id}</h1>
+      <h1>No Case Study Found for Ticket ID: ${case_id}</h1>
     `);
   }
 });
 
-app.get('/search_by_department', requiresAuth(), (req, res) => {
+app.get('/search', requiresAuth(), (req, res) => {
   res.send(`
-    <h1>Search Case Studies by Department</h1>
-    <form action="/cases_by_department" method="post">
-      <label for="department">Enter Department:</label><br>
-      <input type="text" id="department" name="department" required><br><br>
+    <h1>Search Case Studies</h1>
+    <form action="/search" method="post">
+      <label for="searchType">Search By:</label>
+      <select name="searchType" id="searchType">
+        <option value="department">Department</option>
+        <option value="case_id">Case ID</option>
+        <option value="status">Status</option>
+        <option value="priority">Priority</option>
+        <option value="created_by">Created By (Student Name)</option>
+      </select>
+      <br>
+      <label for="searchValue">Search Value:</label>
+      <input type="text" id="searchValue" name="searchValue" required>
+      <br><br>
       <input type="submit" value="Search">
     </form>
   `);
 });
-app.post('/cases_by_department', requiresAuth(), async (req, res) => {
-  const { department } = req.body;
 
-  // Fetch and sort case studies by the 'department' field in ascending order
-  let caseStudiesSortedByDepartment = await CaseStudy.find({ department: department }).sort({ department: 1 });
+app.post('/search', requiresAuth(), async (req, res) => {
+  const { searchType, searchValue } = req.body;
 
-  // Prepare the HTML to display the sorted case studies
-  let caseStudiesDetails = caseStudiesSortedByDepartment.map(caseStudy => `
-    <div>
-      <h3>Ticket ID: ${caseStudy.ticket_id}</h3>
-      <p>Created By: ${caseStudy.created_by}</p>
-      <p>Date Created: ${new Date(caseStudy.date_created).toLocaleString()}</p>
-      <p>Message: ${caseStudy.message}</p>
-      <p>Department: ${caseStudy.department}</p>
-      <p>Student ID: ${caseStudy.student_id}</p>
-      <p>Status: ${caseStudy.status}</p>
-    </div>
-  `).join('');
+  let query = {};
 
-  // Send the HTML response
-  res.send(`
-    <h1>Case Studies in ${department} Department</h1>
-    <div>${caseStudiesDetails}</div>
-  `);
+  switch (searchType) {
+    case 'department':
+      query = { department: searchValue };
+      break;
+    case 'case_id':
+      query = { case_id: searchValue };
+      break;
+    case 'status':
+      query = { 'status': searchValue };
+      break;
+    //case 'priority':
+      //query = { 'status.priority': searchValue };
+      //break;
+    case 'created_by':
+      query = { created_by: searchValue };
+      break;
+    default:
+      res.send('Invalid search type.');
+      return;
+  }
+
+  try {
+    const caseStudies = await CaseStudy.find(query);
+
+    if (caseStudies.length > 0) {
+      const caseStudiesDetails = caseStudies.map(caseStudy => `
+        <div>
+          <h3>Case ID: ${caseStudy.case_id}</h3>
+          <p>Created By: ${caseStudy.created_by}</p>
+          <p>Date Created: ${new Date(caseStudy.date_created).toLocaleString()}</p>
+          <p>Message: ${caseStudy.message}</p>
+          <p>Department: ${caseStudy.department}</p>
+          <p>Status: ${caseStudy.status}</p> <!-- Use optional chaining -->
+          <!-- <p>Priority: ${caseStudy.status?.priority}</p> <!-- Use optional chaining -->
+          <p>Student ID: ${caseStudy.student_id}</p> -->
+        </div>
+      `).join('');
+
+      res.send(`
+        <h1>Search Results</h1>
+        <div>${caseStudiesDetails}</div>
+      `);
+    } else {
+      res.send('No matching case studies found.');
+    }
+  } catch (error) {
+    console.error('Error searching case studies:', error);
+    res.status(500).send('Internal Server Error');
+  }
 });
+
 
 
 

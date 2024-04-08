@@ -24,8 +24,6 @@ app.use(express.static('public'));
 
 
 
-
-
 // running app w/ SSO//
 app.use(session({
   secret: 'this should be a real secret',
@@ -88,8 +86,9 @@ const UserSchema = new mongoose.Schema({
   citizenship: [CitizenshipSchema],
   education: [EducationSchema],
   guardian: [GuardianSchema],
-});
+}, { collection: 'users' });
 
+const userSchema = new mongoose.Schema({}, { collection: 'users' }); // Assuming no specific schema, adjust if needed
 const User = mongoose.model('User', UserSchema);
 
 // Modify the CaseStudySchema to include a status field
@@ -114,15 +113,75 @@ const CaseStudy = mongoose.model('CaseStudy', CaseStudySchema);
 
 
 
+
+// ---------------- Routes/Functions ------------------ // 
+
 // Auth0 setup
 app.use(auth(config));
 app.use(express.urlencoded());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.get('/', (req, res) => {
-  res.send(req.oidc.isAuthenticated() ? 'Logged in' : 'Logged out');
+res.send(req.oidc.isAuthenticated() ? 'Logged in' : 'Logged out');
 });
 
-// User Profile and DB save
+// New Authenticated route with getAllUsers functionality - getAllUsers not working. 
+// see line 502 for working getAllUsers functionality - only accessed thru /users.  
+// app.get('/', async (req, res) => {
+//   console.log("Accessed '/' route"); // Log entry into route handler
+//   console.log("Is Authenticated?", req.oidc.isAuthenticated()); // Log authentication status
+//   if (req.oidc.isAuthenticated()) {
+//     // Proceed to fetch and display all users if the user is logged in
+//     try {
+//       const users = await getAllUsers(); // Assuming this function is defined and works correctly
+//       let usersHtml = users.map(user => `
+//           <tr>
+//               <td>${user.name || ''}</td>
+//               <td>${user.email || ''}</td>
+//               <td>${user.role || ''}</td>
+//               <td>${user.student_id || ''}</td>
+//           </tr>
+//       `).join('');
+
+//       res.send(`
+//           <!DOCTYPE html>
+//           <html lang="en">
+//           <head>
+//               <meta charset="UTF-8">
+//               <title>Home - Users List</title>
+//               <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+//           </head>
+//           <body>
+//               <div class="container mt-5">
+//                   <h2>Registered Users</h2>
+//                   <table class="table">
+//                       <thead>
+//                           <tr>
+//                               <th>Name</th>
+//                               <th>Email</th>
+//                               <th>Role</th>
+//                               <th>Student ID</th>
+//                           </tr>
+//                       </thead>
+//                       <tbody>
+//                           ${usersHtml}
+//                       </tbody>
+//                   </table>
+//               </div>
+//           </body>
+//           </html>
+//       `);
+//     } catch (error) {
+//       console.error('Failed to fetch users:', error);
+//       res.status(500).send('Internal Server Error');
+//     }
+//   } else {
+//     // User is not logged in, display a simple login message
+//     res.send('Logged out');
+//   }
+// });
+
+
+// User Profile and DB save what is this???
 app.get('/profile', requiresAuth(), async (req, res) => {
   let email = req.oidc.user.email;
   let name = req.oidc.user.name;
@@ -142,7 +201,8 @@ app.get('/profile', requiresAuth(), async (req, res) => {
 app.get('/dashboard', requiresAuth(), async (req, res) => {
   let name = req.oidc.user.name;
 
-  // Fetch open case studies created by the logged in user
+  // Fetch open case studies created by the logged in user HMM 
+  // TO DO!!! > Fetch open cases assigned by logged in user's department 
   let caseStudies = await CaseStudy.find({ created_by: name, status: 'Open' });
 
   let caseStudyCount = caseStudies.length;
@@ -229,7 +289,7 @@ app.get('/setStatus', requiresAuth(), (req, res) => {
   res.send(form);
 });
 
-// Handle a status update 
+// Handle a status update from Open to Close and vice versa
 app.post('/setStatus', requiresAuth(), async (req, res) => {
   
   let case_id = req.body.case_id;
@@ -240,7 +300,7 @@ app.post('/setStatus', requiresAuth(), async (req, res) => {
   res.send(`Case study ${case_id} status successfully updated to ${newStatus}.`);
 });
 
-// Display cases with status 'Closed'
+// Display cases with status 'Closed' !! do i still need this if /search can search by all fields???
 app.get('/closed', requiresAuth(), async (req, res) => {
   let closedCases = await CaseStudy.find({ status: 'Closed' });
 
@@ -295,6 +355,7 @@ app.post('/find_case', requiresAuth(), async (req, res) => {
   }
 });
 
+//Search a Case
 app.get('/search', requiresAuth(), (req, res) => {
   res.send(`
     <h1>Search Case Studies</h1>
@@ -373,8 +434,6 @@ app.post('/search', requiresAuth(), async (req, res) => {
 });
 
 
-
-
 // User Profile Route
 app.get('/user/:email', requiresAuth(), async (req, res) => {
   let email = req.params.email;
@@ -438,3 +497,64 @@ app.get('/authorities/:email', requiresAuth(), async (req, res) => {
 });
 
 app.listen(3000, () => console.log('App listening on port 3000'));
+
+
+// Fetch all users - WANT TO PUT THIS AS 'MAIN'. 
+async function getAllUsers() {
+  console.log("Entered getAllUsers function"); // Log entry into function
+  try {
+    const users = await User.find({});
+    console.log("Users fetched:", users); // Log fetched data
+    return users; // Returns an array of user documents
+  } catch (error) {
+    console.error('Error fetching users from database:', error);
+    throw error; // Rethrow or handle error as needed
+  }
+ }
+app.get('/users', async (req, res) => {
+  try {
+    const users = await getAllUsers(); // Fetch all users
+    let usersHtml = users.map(user => `
+        <tr>
+            <td>${user.name || ''}</td>
+            <td>${user.email || ''}</td>
+            <td>${user.role || ''}</td>
+            <td>${user.student_id || ''}</td>
+        </tr>
+    `).join('');
+
+    res.send(`
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Home - Users List</title>
+            <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+        </head>
+        <body>
+            <div class="container mt-5">
+                <h2>Registered Students</h2>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Email</th>
+                            <th>Role</th>
+                            <th>Student ID</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${usersHtml}
+                    </tbody>
+                </table>
+            </div>
+        </body>
+        </html>
+    `);
+  } catch (error) {
+    console.error('Failed to fetch users:', error);
+    res.status(500).send('Internal Server Error');
+  }
+});
+

@@ -74,7 +74,8 @@ const AddressSchema = new mongoose.Schema({
 const UserSchema = new mongoose.Schema({
   name: String, // Consider splitting into first_name and last_name if needed
   email: String,
-  role: String, // Existing fields
+  password: String,
+  role: { type: String, default: 'user' },
   student_id: String,
   last_name: String,
   first_name: String,
@@ -111,6 +112,9 @@ const CaseStudySchema = new mongoose.Schema({
 
 const CaseStudy = mongoose.model('CaseStudy', CaseStudySchema);
 
+// Register new user
+const bcrypt = require('bcrypt');
+
 
 
 
@@ -120,7 +124,7 @@ const CaseStudy = mongoose.model('CaseStudy', CaseStudySchema);
 app.use(auth(config));
 app.use(express.urlencoded());
 app.use(bodyParser.urlencoded({ extended: true }));
-app.get('/', (req, res) => {
+app.get('/', async (req, res) => {
 res.send(req.oidc.isAuthenticated() ? 'Logged in' : 'Logged out');
 });
 
@@ -500,61 +504,162 @@ app.listen(3000, () => console.log('App listening on port 3000'));
 
 
 // Fetch all users - WANT TO PUT THIS AS 'MAIN'. 
-async function getAllUsers() {
-  console.log("Entered getAllUsers function"); // Log entry into function
-  try {
-    const users = await User.find({});
-    console.log("Users fetched:", users); // Log fetched data
-    return users; // Returns an array of user documents
-  } catch (error) {
-    console.error('Error fetching users from database:', error);
-    throw error; // Rethrow or handle error as needed
-  }
- }
-app.get('/users', async (req, res) => {
-  try {
-    const users = await getAllUsers(); // Fetch all users
-    let usersHtml = users.map(user => `
-        <tr>
-            <td>${user.name || ''}</td>
-            <td>${user.email || ''}</td>
-            <td>${user.role || ''}</td>
-            <td>${user.student_id || ''}</td>
-        </tr>
-    `).join('');
+// async function getAllUsers() {
+//   console.log("Entered getAllUsers function"); // Log entry into function
+//   try {
+//     const users = await User.find({});
+//     console.log("Users fetched:", users); // Log fetched data
+//     return users; // Returns an array of user documents
+//   } catch (error) {
+//     console.error('Error fetching users from database:', error);
+//     throw error; // Rethrow or handle error as needed
+//   }
+//  }
+// app.get('/users', async (req, res) => {
+//   try {
+//     const users = await getAllUsers(); // Fetch all users
+//     let usersHtml = users.map(user => `
+//         <tr>
+//             <td>${user.name || ''}</td>
+//             <td>${user.email || ''}</td>
+//             <td>${user.role || ''}</td>
+//             <td>${user.student_id || ''}</td>
+//         </tr>
+//     `).join('');
 
-    res.send(`
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Home - Users List</title>
-            <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
-        </head>
-        <body>
-            <div class="container mt-5">
-                <h2>Registered Students</h2>
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>Email</th>
-                            <th>Role</th>
-                            <th>Student ID</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${usersHtml}
-                    </tbody>
-                </table>
-            </div>
-        </body>
-        </html>
-    `);
+//     res.send(`
+//         <!DOCTYPE html>
+//         <html lang="en">
+//         <head>
+//             <meta charset="UTF-8">
+//             <meta name="viewport" content="width=device-width, initial-scale=1.0">
+//             <title>Home - Users List</title>
+//             <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+//         </head>
+//         <body>
+//             <div class="container mt-5">
+//                 <h2>Registered Students</h2>
+//                 <table class="table">
+//                     <thead>
+//                         <tr>
+//                             <th>Name</th>
+//                             <th>Email</th>
+//                             <th>Role</th>
+//                             <th>Student ID</th>
+//                         </tr>
+//                     </thead>
+//                     <tbody>
+//                         ${usersHtml}
+//                     </tbody>
+//                 </table>
+//             </div>
+//         </body>
+//         </html>
+//     `);
+//   } catch (error) {
+//     console.error('Failed to fetch users:', error);
+//     res.status(500).send('Internal Server Error');
+//   }
+// });
+//Trash the code above maybe??? Keep?? Code below better maybe??
+// Fetch all students from the database
+app.get('/students', async (req, res) => {
+  try {
+    const students = await User.find({ role: 'student' }); // Assuming 'role' is stored as lowercase
+    res.json(students);
   } catch (error) {
-    console.error('Failed to fetch users:', error);
+    console.error('Failed to fetch students:', error);
     res.status(500).send('Internal Server Error');
   }
 });
+
+
+
+
+// Register New Users with RBAC 
+app.post('/register', async (req, res) => {
+    const { name, email, password, role } = req.body;
+    if (!name || !email || !password || !role) {
+        return res.status(400).send('All fields are required');
+    }
+
+    // Check if the role is valid
+    const validRoles = ['admin', 'student', 'guest', 'employer'];
+    if (!validRoles.includes(role.toLowerCase())) {
+        return res.status(400).send('Invalid role specified');
+    }
+
+    try {
+        // Check if user already exists
+        const existingUser = await User.findOne({ email: email });
+        if (existingUser) {
+            return res.status(409).send('User already exists');
+        }
+
+        // Hash the password
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        // Create a new user
+        const newUser = new User({
+            name,
+            email,
+            password: hashedPassword,
+            role
+        });
+
+        // Save the user in the database
+        await newUser.save();
+        res.status(201).send('User registered successfully');
+    } catch (error) {
+        console.error('Error registering new user:', error);
+        res.status(500).send('Internal server error');
+    }
+});
+
+// Serve the registration form
+app.get('/register', (req, res) => {
+  res.send(`
+      <h1>Register New User</h1>
+      <form action="/register" method="post">
+          <label for="name">Name:</label><br>
+          <input type="text" id="name" name="name" required><br>
+          <label for="email">Email:</label><br>
+          <input type="email" id="email" name="email" required><br>
+          <label for="password">Password:</label><br>
+          <input type="password" id="password" name="password" required><br>
+          <label for="role">Role:</label><br>
+          <select id="role" name="role" required>
+              <option value="admin">Admin</option>
+              <option value="student">Student</option>
+              <option value="guest">Parent/Guardian</option>
+              <option value="employer">Employer</option>
+          </select><br><br>
+          <input type="submit" value="Register">
+      </form>
+  `);
+});
+
+
+
+// To-do...
+function checkRole(role) {
+  return function(req, res, next) {
+      const userRole = req.oidc.user.role;
+      if (userRole === role) {
+          next();
+      } else {
+          res.status(403).send('Access denied');
+      }
+  }
+}
+
+app.get('/some-admin-route', requiresAuth(), checkRole('admin'), (req, res) => {
+  res.send('Welcome Admin');
+});
+
+
+
+
+
+
 
